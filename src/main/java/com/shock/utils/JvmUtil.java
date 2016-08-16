@@ -21,22 +21,11 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+
 /**
- * 
- * @author Serkan ÖZAL
- * 
- * @link 
- *       http://hg.openjdk.java.net/jdk7/hotspot/hotspot/file/9b0ca45cd756/src/share
- *       /vm/oops/oop.hpp
- * @link 
- *       http://hg.openjdk.java.net/jdk7/hotspot/hotspot/file/9b0ca45cd756/src/share
- *       /vm/oops/klass.hpp
- * 
- * @link https://blogs.oracle.com/jrockit/entry/understanding_compressed_refer
- * @link https://wikis.oracle.com/display/HotSpotInternals/CompressedOops
- * 
- *       Note: Use "-XX:-UseCompressedOops" for 64 bit JVM to disable
- *       CompressedOops
+ *
+ * jvm内部工具可以查看类和对象的字节
+ *
  */
 public class JvmUtil {
 
