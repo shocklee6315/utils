@@ -26,6 +26,10 @@ import java.util.regex.Pattern;
  *
  * jvm内部工具可以查看类和对象的字节
  *
+ * 试验用的,容易造成 jvm crash
+ *
+ * shocklee
+ *
  */
 public class JvmUtil {
 
