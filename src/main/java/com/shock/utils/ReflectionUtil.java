@@ -1,23 +1,26 @@
 package com.shock.utils;
 
 
-import com.shock.utils.exception.BeanInstantiationException;
-import com.sun.tools.javac.util.Assert;
+import com.shock.utils.exception.ConstructionException;
+import com.shock.utils.opensource.ConcurrentReferenceHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.*;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 public class ReflectionUtil {
 
 	private static final Logger logger = LoggerFactory.getLogger(ReflectionUtil.class);
 
-	
+	/**
+	 * cache declaredMethods use softrefrence
+	 */
+	private static final Map<Class<?>, Method[]> declaredMethodsCache =
+			new ConcurrentReferenceHashMap<Class<?>, Method[]>(256);
+
+
 	public static ClassLoader getDefaultClassLoader() {
 		ClassLoader cl = null;
 		try {
@@ -39,26 +42,26 @@ public class ReflectionUtil {
 		return getDefaultClassLoader().loadClass(className);
 	}
 
-	public static <T> T instantiateClass(Constructor<T> ctor, Object... args) throws BeanInstantiationException {
-		Assert.checkNonNull(ctor, "Constructor must not be null");
+	public static <T> T instantiateClass(Constructor<T> ctor, Object... args) throws ConstructionException {
+		Assert.notNull(ctor, "Constructor must not be null");
 		try {
 			makeAccessible(ctor);
 			return ctor.newInstance(args);
 		}
 		catch (InstantiationException ex) {
-			throw new BeanInstantiationException(ctor.getDeclaringClass(),
+			throw new ConstructionException(ctor.getDeclaringClass(),
 					"Is it an abstract class?", ex);
 		}
 		catch (IllegalAccessException ex) {
-			throw new BeanInstantiationException(ctor.getDeclaringClass(),
+			throw new ConstructionException(ctor.getDeclaringClass(),
 					"Is the constructor accessible?", ex);
 		}
 		catch (IllegalArgumentException ex) {
-			throw new BeanInstantiationException(ctor.getDeclaringClass(),
+			throw new ConstructionException(ctor.getDeclaringClass(),
 					"Illegal arguments for constructor", ex);
 		}
 		catch (InvocationTargetException ex) {
-			throw new BeanInstantiationException(ctor.getDeclaringClass(),
+			throw new ConstructionException(ctor.getDeclaringClass(),
 					"Constructor threw exception", ex.getTargetException());
 		}
 	}
@@ -159,50 +162,28 @@ public class ReflectionUtil {
 		return null;
 	}
 
-	public static Method getMethod(Class<?> cls, String methodName,
-								   Class<?>[] paramTypes) {
-		while (cls != null && cls.equals(Object.class) == false) {
-			Method method = null;
-			for (Method m : cls.getDeclaredMethods()) {
-				if (m.getName().equals(methodName)) {
-					Class<?>[] methodParamTypes = m.getParameterTypes();
-					if (paramTypes == null) {
-						if (methodParamTypes.length == 0) {
-							method = m;
-							break;
-						}
-					} else {
-						if (paramTypes.length == methodParamTypes.length) {
-							boolean allParamsAreSame = true;
-							int length = paramTypes.length;
-							for (int i = 0; i < length; i++) {
-								if (paramTypes[i].equals(methodParamTypes[i]) == false) {
-									allParamsAreSame = false;
-									break;
-								}
-							}
-							if (allParamsAreSame) {
-								method = m;
-								break;
-							}
-						}
-					}
+
+	public static Method findMethod(Class<?> clazz, String name, Class<?>... paramTypes) {
+		Assert.notNull(clazz, "Class must not be null");
+		Assert.notNull(name, "Method name must not be null");
+		Class<?> searchType = clazz;
+		while (searchType != null) {
+			Method[] methods = (searchType.isInterface() ? searchType.getMethods() : getDeclaredMethods(searchType));
+			for (Method method : methods) {
+				if (name.equals(method.getName()) &&
+						(paramTypes == null || Arrays.equals(paramTypes, method.getParameterTypes()))) {
+					return method;
 				}
 			}
-			if (method == null) {
-				logger.warn("Unable to get method " + methodName
-						+ " from class " + cls.getName() + ". "
-						+ "If there is any super class for class "
-						+ cls.getName()
-						+ ", it will be tried for getting method ...");
-			} else {
-				method.setAccessible(true);
-				return method;
-			}
-			cls = cls.getSuperclass();
+			searchType = searchType.getSuperclass();
 		}
 		return null;
 	}
+
+	public static Method findMethod(Class<?> clazz, String name) {
+		return findMethod(clazz, name, new Class<?>[0]);
+	}
+
 
 	@SuppressWarnings("unchecked")
 	public static List<Method> getAllMethods(Class<?> cls) {
@@ -392,4 +373,56 @@ public class ReflectionUtil {
 		}
 	}
 
+
+	public static Object invokeMethod(Method method, Object target) {
+		return invokeMethod(method, target, new Object[0]);
+	}
+
+	public static Object invokeMethod(Method method, Object target, Object... args) {
+		try {
+			return method.invoke(target, args);
+		}
+		catch (Exception ex) {
+			handleReflectionException(ex);
+		}
+		throw new IllegalStateException("Should never get here");
+	}
+
+	public static void handleReflectionException(Exception ex) {
+		if (ex instanceof NoSuchMethodException) {
+			throw new IllegalStateException("Method not found: " + ex.getMessage());
+		}
+		if (ex instanceof IllegalAccessException) {
+			throw new IllegalStateException("Could not access method: " + ex.getMessage());
+		}
+		if (ex instanceof InvocationTargetException) {
+			handleInvocationTargetException((InvocationTargetException) ex);
+		}
+		if (ex instanceof RuntimeException) {
+			throw (RuntimeException) ex;
+		}
+		throw new UndeclaredThrowableException(ex);
+	}
+
+	public static void rethrowRuntimeException(Throwable ex) {
+		if (ex instanceof RuntimeException) {
+			throw (RuntimeException) ex;
+		}
+		if (ex instanceof Error) {
+			throw (Error) ex;
+		}
+		throw new UndeclaredThrowableException(ex);
+	}
+	public static void handleInvocationTargetException(InvocationTargetException ex) {
+		rethrowRuntimeException(ex.getTargetException());
+	}
+
+	private static Method[] getDeclaredMethods(Class<?> clazz) {
+		Method[] result = declaredMethodsCache.get(clazz);
+		if (result == null) {
+			result = clazz.getDeclaredMethods();
+			declaredMethodsCache.put(clazz, result);
+		}
+		return result;
+	}
 }
