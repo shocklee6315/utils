@@ -22,6 +22,8 @@ public class RunClassUtilTest {
     public static class RunClass{
         public static void main(String[] args) {
             System.out.println("RunClass====> main");
+
+            
         }
     }
 }
